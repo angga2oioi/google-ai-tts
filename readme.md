@@ -56,17 +56,26 @@ function App() {
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `apiKey` | `string` | **required** | Google Cloud API key |
-| `text` | `string` | **required** | Text to synthesize. A new value triggers synthesis. |
-| `prompt` | `string` | — | Optional style prompt passed as `input.prompt` (v1beta1 only) |
+| `apiKey` | `string` | **required** | Google AI / Google Cloud API key |
+| `text` | `string` | **required** | Text to synthesize. Supports inline audio tags e.g. `[whispers]`, `[laughs]`. A new value triggers synthesis. |
+| `prompt` | `string` | — | Natural language style prompt e.g. `"Speak in a calm, professional tone"` |
 | `languageCode` | `string` | `"en-US"` | BCP-47 language tag, e.g. `"id-ID"`, `"ja-JP"` |
-| `voiceName` | `string` | `"en-US-Neural2-F"` | Voice name from the [voice list](https://cloud.google.com/text-to-speech/docs/voices) |
-| `modelName` | `string` | `"en-US-Neural2-F"` | TTS model name |
+| `voiceName` | `string` | `"Charon"` | Speaker ID from the 30 prebuilt voices e.g. `"Puck"`, `"Kore"`, `"Charon"` |
+| `modelName` | `string` | `"gemini-2.5-flash-tts"` | Gemini TTS model. See supported models below. |
 | `pitch` | `number` | `0` | Pitch adjustment from `-20` to `20` |
 | `speakingRate` | `number` | `1.0` | Speaking rate from `0.25` to `4.0` |
 | `onStart` | `() => void` | — | Called when audio begins playing |
 | `onEnd` | `() => void` | — | Called when audio finishes naturally (not on manual stop) |
 | `onError` | `(err: Error) => void` | — | Called if the API request or audio decoding fails |
+
+### Supported models
+
+| `modelName` | Best for |
+|---|---|
+| `gemini-3.1-flash-tts-preview` | Latest — 70+ languages, 200+ audio tags |
+| `gemini-2.5-pro-tts` | Studio quality |
+| `gemini-2.5-flash-tts` | Low latency (default) |
+| `gemini-2.5-flash-lite-preview-tts` | Fastest / lowest cost |
 
 ## Examples
 
