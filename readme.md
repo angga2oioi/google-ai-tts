@@ -138,11 +138,7 @@ const [status, setStatus] = React.useState('idle') // 'idle' | 'loading' | 'play
 
 ## Security
 
-⚠️ **Never expose your API key in client-side code in production.** Instead, proxy requests through your own backend:
-
-1. Create a server route (e.g. `POST /api/tts`) that forwards requests to Google and returns the audio.
-2. Fork the component and replace the `fetch` call to point at your proxy.
-3. Apply authentication and rate limiting on your server.
+⚠️ **Never expose your API key without restrictions.** In the [Google Cloud Console](https://console.cloud.google.com/apis/credentials), restrict your API key to only allow requests from your approved domains.
 
 ## API Reference
 
