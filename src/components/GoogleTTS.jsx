@@ -36,7 +36,7 @@ export default function GoogleTTS({
     text,
     prompt,
     languageCode = "en-US",
-    voiceName = "en-US-Neural2-F",
+    voiceName = "Achernar",
     modelName = "gemini-3.1-flash-tts-preview",
     pitch = 0,
     speakingRate = 1.0,
