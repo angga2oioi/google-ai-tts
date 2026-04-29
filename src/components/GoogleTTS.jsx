@@ -62,20 +62,13 @@ export default function GoogleTTS({
         stopCurrent();
 
         const payload = {
-            audioConfig: {
-                audioEncoding: "LINEAR16",
-                pitch,
-                speakingRate,
-            },
-            input: {
-                ...(prompt ? { prompt } : {}),
-                text: inputText,
-            },
-            voice: {
-                languageCode,
-                name: voiceName,
-                modelName,
-            },
+            ...(prompt ? { prompt } : {}),
+            text: inputText,
+            languageCode,
+            modelName,
+            voiceName,
+            pitch,
+            speakingRate
         };
 
         try {
