@@ -39,7 +39,7 @@ function App() {
       <textarea onChange={e => setText(e.target.value)} />
 
       <GoogleTTS
-        apiKey={process.env.REACT_APP_GOOGLE_TTS_KEY}
+        speechUrl={YOUR_SPEECH_URL}
         text={text}
         onStart={() => setPlaying(true)}
         onEnd={() => setPlaying(false)}
@@ -56,7 +56,7 @@ function App() {
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `apiKey` | `string` | **required** | Google AI / Google Cloud API key |
+| `speechUrl` | `string` | **required** | Backend URL |
 | `text` | `string` | **required** | Text to synthesize. Supports inline audio tags e.g. `[whispers]`, `[laughs]`. A new value triggers synthesis. |
 | `prompt` | `string` | — | Natural language style prompt e.g. `"Speak in a calm, professional tone"` |
 | `languageCode` | `string` | `"en-US"` | BCP-47 language tag, e.g. `"id-ID"`, `"ja-JP"` |
@@ -83,7 +83,7 @@ function App() {
 
 ```jsx
 <GoogleTTS
-  apiKey={apiKey}
+  speechUrl={YOUR_SPEECH_URL}
   text="Halo, apa kabar?"
   languageCode="id-ID"
   voiceName="id-ID-Neural2-A"
@@ -94,7 +94,7 @@ function App() {
 
 ```jsx
 <GoogleTTS
-  apiKey={apiKey}
+  speechUrl={YOUR_SPEECH_URL}
   text={narration}
   speakingRate={1.25}
   pitch={-4}
@@ -105,7 +105,7 @@ function App() {
 
 ```jsx
 <GoogleTTS
-  apiKey={apiKey}
+  speechUrl={YOUR_SPEECH_URL}
   text="Welcome aboard."
   prompt="Speak in a calm, professional tone."
   voiceName="en-US-Neural2-D"
@@ -118,7 +118,7 @@ function App() {
 const [status, setStatus] = React.useState('idle') // 'idle' | 'loading' | 'playing' | 'error'
 
 <GoogleTTS
-  apiKey={apiKey}
+  speechUrl={YOUR_SPEECH_URL}
   text={text}
   onStart={() => setStatus('playing')}
   onEnd={() => setStatus('idle')}
@@ -136,13 +136,6 @@ const [status, setStatus] = React.useState('idle') // 'idle' | 'loading' | 'play
 
 **AudioContext lifecycle** — a single `AudioContext` is created on first synthesis and reused for the lifetime of the component. It is closed when the component unmounts.
 
-## Security
-
-⚠️ **Never expose your API key without restrictions.** In the [Google Cloud Console](https://console.cloud.google.com/apis/credentials), restrict your API key to only allow requests from your approved domains.
-
-## API Reference
-
-This component uses the [Google Cloud Text-to-Speech v1beta1 REST API](https://cloud.google.com/text-to-speech/docs/reference/rest/v1beta1/text/synthesize). Audio is returned as `LINEAR16`-encoded base64 and decoded via the Web Audio API.
 
 ## Browser Support
 

@@ -32,6 +32,7 @@ import { useEffect, useRef, useCallback, useState } from "react";
  *   />
  */
 export default function GoogleTTS({
+    speechUrl,
     apiKey,
     text,
     prompt,
@@ -79,7 +80,7 @@ export default function GoogleTTS({
 
         try {
             const res = await fetch(
-                `https://texttospeech.googleapis.com/v1beta1/text:synthesize?key=${apiKey}`,
+                speechUrl,
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -87,14 +88,13 @@ export default function GoogleTTS({
                 }
             );
 
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error?.message || res.statusText);
-            if (!data.audioContent) throw new Error("No audioContent in response");
+            if (!res.ok) {
+                const errorText = await res.text();
+                throw new Error(errorText || res.statusText);
+            }
 
-            // Decode base64 PCM → ArrayBuffer
-            const binary = atob(data.audioContent);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            // 1. Get the response as an ArrayBuffer directly
+            const arrayBuffer = await res.arrayBuffer();
 
             if (!audioCtxRef.current) {
                 audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -102,10 +102,12 @@ export default function GoogleTTS({
             const ctx = audioCtxRef.current;
             if (ctx.state === "suspended") await ctx.resume();
 
-            const buffer = await ctx.decodeAudioData(bytes.buffer);
+            // 2. Decode the binary directly (no more atob or base64 loops!)
+            const buffer = await ctx.decodeAudioData(arrayBuffer);
 
             const source = ctx.createBufferSource();
             source.buffer = buffer;
+
             source.connect(ctx.destination);
             sourceRef.current = source;
 
