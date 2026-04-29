@@ -221,6 +221,8 @@ const [status, setStatus] = React.useState('idle') // 'idle' | 'loading' | 'play
 
 **Cache invalidation** — if any component-level default prop changes (`languageCode`, `voiceName`, `modelName`, `pitch`, `speakingRate`), the entire preload cache is cleared and entries are re-fetched on next use. Per-entry overrides are always respected regardless of this.
 
+**Parallel preloading** — all entries in `preloadTexts` are fetched and decoded concurrently via `Promise.all`. A slow or failed entry does not block the others.
+
 **Preload deduplication** — each index is fetched at most once per cache lifetime. If `preloadTexts` changes reference but an entry is already cached or in-flight, it is skipped.
 
 **On-demand fallback** — calling `play(index)` before that entry has finished preloading triggers an immediate on-demand fetch for that index only; the result is cached for future calls.

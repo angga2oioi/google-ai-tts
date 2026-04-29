@@ -180,8 +180,17 @@ export default function GoogleTTS({
     let loaded = 0;
     const total = preloadTexts.length;
 
-    preloadTexts.forEach(async (entry, i) => {
-      if (preloadCache.current.has(i) || inFlight.current.has(i)) return;
+    // Fan out all fetches in parallel. Each entry races independently so a
+    // slow or failed item doesn't block the others.
+    const promises = preloadTexts.map(async (entry, i) => {
+      if (preloadCache.current.has(i) || inFlight.current.has(i)) {
+        // Already done or in-flight — count it toward progress immediately
+        loaded++;
+        onPreloadProgress?.(loaded, total);
+        if (loaded === total) onAllLoaded?.();
+        return;
+      }
+
       inFlight.current.add(i);
       try {
         const buffer = await fetchAndDecode(resolveParams(entry));
@@ -196,6 +205,9 @@ export default function GoogleTTS({
         inFlight.current.delete(i);
       }
     });
+
+    // Swallow top-level rejections — each entry handles its own errors above
+    Promise.all(promises).catch(() => {});
 
     return () => { cancelled = true; };
   }, [preloadTexts]); // eslint-disable-line react-hooks/exhaustive-deps
