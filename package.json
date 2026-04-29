@@ -1,0 +1,31 @@
+{
+  "name": "google-ai-tts",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/google-ai-tts.cjs.js",
+  "module": "./dist/google-ai-tts.es.js",
+  "exports": {
+    ".": {
+      "import": "./dist/google-ai-tts.es.js",
+      "require": "./dist/google-ai-tts.cjs.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "prepare": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=17",
+    "react-dom": ">=17"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "vite": "^5.0.0"
+  }
+}
