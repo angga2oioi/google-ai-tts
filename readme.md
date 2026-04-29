@@ -8,7 +8,7 @@ A headless React component for Google Cloud Text-to-Speech. Drop it anywhere in 
 - ⚡ **Debounced** — avoids redundant API calls while text is still changing
 - 🔄 **Auto-cancels** — stops previous audio before starting new synthesis
 - 📦 **Preload** — fetch and decode multiple clips upfront, play them instantly on demand
-- 🎛️ **Fully controllable** — pitch, speed, voice, language, style prompt
+- 🎛️ **Per-clip overrides** — each preloaded entry can use its own voice, language, speed, and more
 - 🧹 **Cleans up** — stops audio and closes AudioContext on unmount
 
 ## Requirements
@@ -60,11 +60,11 @@ function App() {
 | `speechUrl` | `string` | **required** | Backend URL |
 | `text` | `string` | — | Text to synthesize. A new value triggers synthesis after an 800 ms debounce. Supports inline audio tags e.g. `[whispers]`, `[laughs]`. |
 | `prompt` | `string` | — | Natural language style prompt e.g. `"Speak in a calm, professional tone"` |
-| `preloadTexts` | `string[]` | — | Array of strings to fetch and decode in the background on mount. Play any entry instantly via `playSpeechRef`. |
-| `playSpeechRef` | `React.MutableRefObject` | — | Attach a ref to receive the imperative playback API. See [Imperative API](#imperative-api) below. |
+| `preloadTexts` | `Array<string \| PreloadEntry>` | — | Clips to fetch and decode in the background on mount. Each item is either a plain string (uses component defaults) or a `PreloadEntry` object with per-clip overrides. See [Preload entries](#preload-entries). |
+| `playSpeechRef` | `React.MutableRefObject` | — | Attach a ref to receive the imperative playback API. See [Imperative API](#imperative-api). |
 | `languageCode` | `string` | `"en-US"` | BCP-47 language tag, e.g. `"id-ID"`, `"ja-JP"` |
-| `voiceName` | `string` | `"Charon"` | Speaker ID from the 30 prebuilt voices e.g. `"Puck"`, `"Kore"`, `"Charon"`. Check it [here](https://ai.google.dev/gemini-api/docs/speech-generation#voices)|
-| `modelName` | `string` | `"gemini-2.5-flash-tts"` | Gemini TTS model. See supported models below. |
+| `voiceName` | `string` | `"Charon"` | Speaker ID from the 30 prebuilt voices e.g. `"Puck"`, `"Kore"`, `"Charon"`. Check it [here](https://ai.google.dev/gemini-api/docs/speech-generation#voices) |
+| `modelName` | `string` | `"gemini-2.5-flash-tts"` | Gemini TTS model. See [supported models](#supported-models). |
 | `pitch` | `number` | `0` | Pitch adjustment from `-20` to `20` |
 | `speakingRate` | `number` | `1.0` | Speaking rate from `0.25` to `4.0` |
 | `onStart` | `() => void` | — | Called when audio begins playing |
@@ -81,33 +81,58 @@ function App() {
 | `gemini-2.5-flash-tts` | Low latency (default) |
 | `gemini-2.5-flash-lite-preview-tts` | Fastest / lowest cost |
 
+### Preload entries
+
+Each item in `preloadTexts` can be a plain string or a `PreloadEntry` object:
+
+```ts
+type PreloadEntry = {
+  text: string          // required
+  languageCode?: string
+  voiceName?: string
+  modelName?: string
+  pitch?: number
+  speakingRate?: number
+  prompt?: string
+}
+```
+
+Plain strings use the component-level defaults. Object entries are merged on top of the defaults, so you only need to specify what differs:
+
+```jsx
+preloadTexts={[
+  "Hello!",                                           // uses component defaults
+  { text: "Halo!", languageCode: "id-ID", voiceName: "id-ID-Neural2-A" },
+  { text: "Welcome.", speakingRate: 0.9, pitch: -2 },
+]}
+```
+
 ## Imperative API
 
 When you pass a `playSpeechRef`, the component populates it with a control object after mount:
 
 | Method | Signature | Description |
 |---|---|---|
-| `play` | `(index: number) => Promise<void>` | Plays the preloaded buffer at `index`. Falls back to an on-demand fetch if not yet cached. |
+| `play` | `(index: number) => Promise<void>` | Plays the preloaded buffer at `index`, using that entry's resolved params. Falls back to an on-demand fetch if not yet cached. |
 | `stop` | `() => void` | Stops any currently playing audio immediately. |
 | `isReady` | `(index: number) => boolean` | Returns `true` if the buffer at `index` is decoded and ready to play. |
 | `readyCount` | `() => number` | Returns the total number of fully loaded buffers. |
 
 ## Examples
 
-### Preload a set of clips and play on demand
+### Preload clips with mixed languages and voices
 
 ```jsx
 const ttsRef = React.useRef()
 
-const lines = [
-  "Welcome to the tour.",
-  "On your left you'll see the main hall.",
-  "Thank you for visiting.",
-]
-
 <GoogleTTS
   speechUrl={YOUR_SPEECH_URL}
-  preloadTexts={lines}
+  voiceName="Puck"
+  preloadTexts={[
+    "Welcome to the tour.",
+    { text: "Selamat datang.", languageCode: "id-ID", voiceName: "id-ID-Neural2-A" },
+    { text: "Thank you!", speakingRate: 1.2 },
+  ]}
   playSpeechRef={ttsRef}
   onPreloadProgress={(loaded, total) =>
     console.log(`${loaded} / ${total} clips ready`)
@@ -117,10 +142,9 @@ const lines = [
   onError={console.error}
 />
 
-// Later — plays instantly from cache:
-<button onClick={() => ttsRef.current.play(1)}>
-  Play line 2
-</button>
+// Play instantly from cache:
+<button onClick={() => ttsRef.current.play(0)}>English</button>
+<button onClick={() => ttsRef.current.play(1)}>Indonesian</button>
 ```
 
 ### Reactive mode (text changes drive synthesis)
@@ -136,25 +160,14 @@ const lines = [
 
 ### Both modes together
 
-The two modes are independent and can run simultaneously. `text` drives reactive synthesis while `preloadTexts` + `playSpeechRef` handle on-demand playback.
+The two modes are independent and can run simultaneously — `text` drives reactive synthesis while `preloadTexts` + `playSpeechRef` handle on-demand playback.
 
 ```jsx
 <GoogleTTS
   speechUrl={YOUR_SPEECH_URL}
   text={liveCaption}
-  preloadTexts={uiSounds}
+  preloadTexts={uiSoundLines}
   playSpeechRef={ttsRef}
-/>
-```
-
-### Different language and voice
-
-```jsx
-<GoogleTTS
-  speechUrl={YOUR_SPEECH_URL}
-  text="Halo, apa kabar?"
-  languageCode="id-ID"
-  voiceName="id-ID-Neural2-A"
 />
 ```
 
@@ -200,9 +213,13 @@ const [status, setStatus] = React.useState('idle') // 'idle' | 'loading' | 'play
 
 **Auto-cancel** — if `text` changes while audio is playing, the current audio stops immediately and new synthesis begins after the debounce delay.
 
-**Preload deduplication** — each index is fetched at most once. If `preloadTexts` changes reference but contains the same indices, already-cached or in-flight entries are skipped.
+**Per-entry overrides** — each `preloadTexts` entry is merged with the component-level defaults at fetch time. Only the fields you specify are overridden; everything else inherits from the component props.
 
-**On-demand fallback** — calling `play(index)` before that entry has finished preloading triggers an immediate on-demand fetch for that index only; the result is then cached for future calls.
+**Cache invalidation** — if any component-level default prop changes (`languageCode`, `voiceName`, `modelName`, `pitch`, `speakingRate`), the entire preload cache is cleared and entries are re-fetched on next use. Per-entry overrides are always respected regardless of this.
+
+**Preload deduplication** — each index is fetched at most once per cache lifetime. If `preloadTexts` changes reference but an entry is already cached or in-flight, it is skipped.
+
+**On-demand fallback** — calling `play(index)` before that entry has finished preloading triggers an immediate on-demand fetch for that index only; the result is cached for future calls.
 
 **Natural end detection** — `onEnd` only fires when audio completes on its own. It does not fire when synthesis is interrupted by a new `text` value, a `stop()` call, or component unmount.
 

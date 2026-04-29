@@ -1,73 +1,77 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback } from "react";
 
 /**
  * GoogleTTS
  *
  * Two modes that can be used together:
  *
- * ── Reactive mode (original) ──────────────────────────────────────────────
+ * ── Reactive mode ─────────────────────────────────────────────────────────
  *   text          {string}   Text to synthesize on change (debounced 800ms)
  *   prompt        {string}   Optional style prompt
  *
- * ── Preload mode (new) ────────────────────────────────────────────────────
- *   preloadTexts  {string[]} Array of strings to fetch & decode on mount
- *                            (or whenever the array reference changes)
+ * ── Preload mode ──────────────────────────────────────────────────────────
+ *   preloadTexts  {Array<string | PreloadEntry>}
+ *                            Strings or objects to fetch & decode on mount.
+ *                            Each object can override any voice param:
+ *                            { text, languageCode, voiceName, modelName,
+ *                              pitch, speakingRate, prompt }
+ *                            Plain strings use the component-level defaults.
  *
- * ── Imperative playback (new) ─────────────────────────────────────────────
+ * ── Imperative playback ───────────────────────────────────────────────────
  *   playSpeechRef {React.MutableRefObject}
- *                            Attach a ref here; after mount it will hold:
- *                            { play(index), stop(), isReady(index) }
- *
- * All other props (speechUrl, languageCode, voiceName, …) are shared.
+ *                            After mount holds: { play(index), stop(),
+ *                            isReady(index), readyCount() }
  *
  * Usage:
- *   const ttsRef = useRef();
+ *   const ttsRef = useRef()
  *
  *   <GoogleTTS
  *     speechUrl="/api/tts"
- *     preloadTexts={["Hello!", "How are you?", "Goodbye!"]}
+ *     preloadTexts={[
+ *       "Hello!",
+ *       { text: "Halo!", languageCode: "id-ID", voiceName: "id-ID-Neural2-A" },
+ *       { text: "Welcome.", speakingRate: 0.9, pitch: -2 },
+ *     ]}
  *     playSpeechRef={ttsRef}
  *     onStart={() => setPlaying(true)}
  *     onEnd={()   => setPlaying(false)}
  *     onError={console.error}
  *   />
  *
- *   // later:
- *   ttsRef.current.play(1);   // plays "How are you?"
- *   ttsRef.current.stop();
- *   ttsRef.current.isReady(0); // true once decoded
+ *   ttsRef.current.play(1)    // plays "Halo!" with id-ID voice
+ *   ttsRef.current.stop()
+ *   ttsRef.current.isReady(0) // true once decoded
  */
 export default function GoogleTTS({
   speechUrl,
-  apiKey,
   // reactive mode
   text,
   prompt,
   // preload mode
   preloadTexts,
   playSpeechRef,
-  // voice config
-  languageCode  = "en-US",
-  voiceName     = "Achernar",
-  modelName     = "gemini-3.1-flash-tts-preview",
-  pitch         = 0,
-  speakingRate  = 1.0,
+  // component-level voice defaults
+  languageCode = "en-US",
+  voiceName = "Charon",
+  modelName = "gemini-2.5-flash-tts",
+  pitch = 0,
+  speakingRate = 1.0,
   // callbacks
   onStart,
   onEnd,
   onError,
-  onPreloadProgress, // (loadedCount, totalCount) => void
+  onPreloadProgress,
 }) {
-  const audioCtxRef    = useRef(null);
-  const sourceRef      = useRef(null);
-  const debounceRef    = useRef(null);
-  const naturalEndRef  = useRef(false);
+  const audioCtxRef = useRef(null);
+  const sourceRef = useRef(null);
+  const debounceRef = useRef(null);
+  const naturalEndRef = useRef(false);
   // Map<index, AudioBuffer>
-  const preloadCache   = useRef(new Map());
-  // Track in-flight fetches so we don't double-fetch
-  const inFlight       = useRef(new Set());
+  const preloadCache = useRef(new Map());
+  // Set<index> — tracks in-flight fetches to avoid duplicates
+  const inFlight = useRef(new Set());
 
-  // ── Shared helpers ────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   const getAudioCtx = useCallback(() => {
     if (!audioCtxRef.current) {
@@ -80,45 +84,38 @@ export default function GoogleTTS({
   const stopCurrent = useCallback(() => {
     if (sourceRef.current) {
       naturalEndRef.current = false;
-      try { sourceRef.current.stop(); } catch (_) {}
+      try { sourceRef.current.stop(); } catch (_) { }
       sourceRef.current = null;
     }
   }, []);
 
+  /**
+   * Merge component-level defaults with a preload entry's per-entry overrides.
+   * Accepts a plain string or a { text, ...overrides } object.
+   */
+  const resolveParams = useCallback((entry) => {
+    const defaults = { languageCode, voiceName, modelName, pitch, speakingRate, prompt };
+    if (typeof entry === "string") return { ...defaults, text: entry };
+    const { text: t, ...overrides } = entry;
+    return { ...defaults, ...overrides, text: t };
+  }, [languageCode, voiceName, modelName, pitch, speakingRate, prompt]);
+
   // ── Core fetch + decode ───────────────────────────────────────────────────
 
-  const fetchAndDecode = useCallback(async (inputText) => {
-    const payload = {
-      ...(prompt ? { prompt } : {}),
-      text: inputText,
-      languageCode,
-      modelName,
-      voiceName,
-      pitch,
-      speakingRate,
-    };
-
+  const fetchAndDecode = useCallback(async (params) => {
     const res = await fetch(speechUrl, {
-      method:  "POST",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(payload),
+      body: JSON.stringify(params),
     });
-
-    if (!res.ok) {
-      const msg = await res.text();
-      throw new Error(msg || res.statusText);
-    }
-
-    const arrayBuffer = await res.arrayBuffer();
-    const ctx = getAudioCtx();
-    return ctx.decodeAudioData(arrayBuffer);
-  }, [speechUrl, prompt, languageCode, modelName, voiceName, pitch, speakingRate, getAudioCtx]);
+    if (!res.ok) throw new Error((await res.text()) || res.statusText);
+    return getAudioCtx().decodeAudioData(await res.arrayBuffer());
+  }, [speechUrl, getAudioCtx]);
 
   // ── Play an AudioBuffer ───────────────────────────────────────────────────
 
   const playBuffer = useCallback(async (buffer) => {
     stopCurrent();
-
     const ctx = getAudioCtx();
     if (ctx.state === "suspended") await ctx.resume();
 
@@ -137,17 +134,19 @@ export default function GoogleTTS({
     onStart?.();
   }, [stopCurrent, getAudioCtx, onStart, onEnd]);
 
-  // ── Reactive mode (original behaviour) ───────────────────────────────────
+  // ── Reactive mode ─────────────────────────────────────────────────────────
 
   const synthesize = useCallback(async (inputText) => {
     stopCurrent();
     try {
-      const buffer = await fetchAndDecode(inputText);
+      const buffer = await fetchAndDecode(
+        resolveParams(inputText)
+      );
       await playBuffer(buffer);
     } catch (err) {
       onError?.(err);
     }
-  }, [fetchAndDecode, playBuffer, stopCurrent, onError]);
+  }, [fetchAndDecode, resolveParams, playBuffer, stopCurrent, onError]);
 
   useEffect(() => {
     if (!text?.trim()) { stopCurrent(); return; }
@@ -158,6 +157,13 @@ export default function GoogleTTS({
 
   // ── Preload mode ──────────────────────────────────────────────────────────
 
+  // Clear cache when component-level defaults change so stale buffers
+  // (that were encoded with old params) aren't replayed.
+  useEffect(() => {
+    preloadCache.current.clear();
+    inFlight.current.clear();
+  }, [languageCode, voiceName, modelName, pitch, speakingRate]);
+
   useEffect(() => {
     if (!preloadTexts?.length) return;
 
@@ -165,13 +171,11 @@ export default function GoogleTTS({
     let loaded = 0;
     const total = preloadTexts.length;
 
-    preloadTexts.forEach(async (t, i) => {
-      // Skip if already cached or in-flight
+    preloadTexts.forEach(async (entry, i) => {
       if (preloadCache.current.has(i) || inFlight.current.has(i)) return;
-
       inFlight.current.add(i);
       try {
-        const buffer = await fetchAndDecode(t);
+        const buffer = await fetchAndDecode(resolveParams(entry));
         if (cancelled) return;
         preloadCache.current.set(i, buffer);
         loaded++;
@@ -186,7 +190,7 @@ export default function GoogleTTS({
     return () => { cancelled = true; };
   }, [preloadTexts]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Imperative API via ref ────────────────────────────────────────────────
+  // ── Imperative API ────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!playSpeechRef) return;
@@ -194,20 +198,19 @@ export default function GoogleTTS({
     playSpeechRef.current = {
       /**
        * play(index)
-       * Plays the preloaded buffer at `index`.
-       * Falls back to fetching on-demand if not yet cached.
+       * Plays the preloaded buffer at `index`, respecting that entry's
+       * per-entry param overrides. Falls back to an on-demand fetch if
+       * not yet cached.
        */
       play: async (index) => {
         try {
           let buffer = preloadCache.current.get(index);
-
           if (!buffer) {
-            const t = preloadTexts?.[index];
-            if (!t) throw new Error(`No text at index ${index}`);
-            buffer = await fetchAndDecode(t);
+            const entry = preloadTexts?.[index];
+            if (!entry) throw new Error(`No text at index ${index}`);
+            buffer = await fetchAndDecode(resolveParams(entry));
             preloadCache.current.set(index, buffer);
           }
-
           await playBuffer(buffer);
         } catch (err) {
           onError?.(err);
@@ -217,10 +220,10 @@ export default function GoogleTTS({
       /** stop() — stops any currently playing audio */
       stop: stopCurrent,
 
-      /** isReady(index) — true if the buffer is cached and ready */
+      /** isReady(index) — true if the buffer is cached and ready to play */
       isReady: (index) => preloadCache.current.has(index),
 
-      /** readyCount() — number of buffers fully loaded */
+      /** readyCount() — number of fully loaded buffers */
       readyCount: () => preloadCache.current.size,
     };
   }); // runs every render so callbacks stay fresh
