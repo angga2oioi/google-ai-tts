@@ -60,7 +60,7 @@ function App() {
 | `text` | `string` | **required** | Text to synthesize. Supports inline audio tags e.g. `[whispers]`, `[laughs]`. A new value triggers synthesis. |
 | `prompt` | `string` | — | Natural language style prompt e.g. `"Speak in a calm, professional tone"` |
 | `languageCode` | `string` | `"en-US"` | BCP-47 language tag, e.g. `"id-ID"`, `"ja-JP"` |
-| `voiceName` | `string` | `"Charon"` | Speaker ID from the 30 prebuilt voices e.g. `"Puck"`, `"Kore"`, `"Charon"` |
+| `voiceName` | `string` | `"Charon"` | Speaker ID from the 30 prebuilt voices e.g. `"Puck"`, `"Kore"`, `"Charon"`. Check it [here](https://ai.google.dev/gemini-api/docs/speech-generation#voices)|
 | `modelName` | `string` | `"gemini-2.5-flash-tts"` | Gemini TTS model. See supported models below. |
 | `pitch` | `number` | `0` | Pitch adjustment from `-20` to `20` |
 | `speakingRate` | `number` | `1.0` | Speaking rate from `0.25` to `4.0` |
