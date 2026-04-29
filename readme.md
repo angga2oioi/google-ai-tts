@@ -69,6 +69,8 @@ function App() {
 | `speakingRate` | `number` | `1.0` | Speaking rate from `0.25` to `4.0` |
 | `onStart` | `() => void` | — | Called when audio begins playing |
 | `onEnd` | `() => void` | — | Called when audio finishes naturally (not on manual stop) |
+| `onLoaded` | `() => void` | — | Reactive mode: called when the clip is decoded and ready, just before playback begins |
+| `onAllLoaded` | `() => void` | — | Preload mode: called once every entry in `preloadTexts` has been decoded successfully |
 | `onError` | `(err: Error) => void` | — | Called if the API request or audio decoding fails |
 | `onPreloadProgress` | `(loaded: number, total: number) => void` | — | Called after each `preloadTexts` entry finishes decoding |
 
@@ -134,6 +136,7 @@ const ttsRef = React.useRef()
     { text: "Thank you!", speakingRate: 1.2 },
   ]}
   playSpeechRef={ttsRef}
+  onAllLoaded={() => setButtonsEnabled(true)}
   onPreloadProgress={(loaded, total) =>
     console.log(`${loaded} / ${total} clips ready`)
   }
@@ -153,6 +156,7 @@ const ttsRef = React.useRef()
 <GoogleTTS
   speechUrl={YOUR_SPEECH_URL}
   text={transcript}
+  onLoaded={() => setStatus('ready')}
   onStart={() => setPlaying(true)}
   onEnd={() => setPlaying(false)}
 />
@@ -222,6 +226,10 @@ const [status, setStatus] = React.useState('idle') // 'idle' | 'loading' | 'play
 **On-demand fallback** — calling `play(index)` before that entry has finished preloading triggers an immediate on-demand fetch for that index only; the result is cached for future calls.
 
 **Natural end detection** — `onEnd` only fires when audio completes on its own. It does not fire when synthesis is interrupted by a new `text` value, a `stop()` call, or component unmount.
+
+**`onLoaded` vs `onStart`** — in reactive mode, `onLoaded` fires the moment a clip is decoded and queued, while `onStart` fires when the first audio sample is sent to the speakers. In practice these are milliseconds apart, but `onLoaded` is useful for updating UI state (e.g. hiding a spinner) before the audible playback begins.
+
+**`onAllLoaded`** — fires exactly once per `preloadTexts` array, after the last entry decodes successfully. It does not fire again if the array reference changes and some entries were already cached (use `onPreloadProgress` to track incremental progress instead).
 
 **AudioContext lifecycle** — a single `AudioContext` is created on first synthesis and reused for the lifetime of the component. It is closed when the component unmounts.
 

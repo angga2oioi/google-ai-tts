@@ -41,6 +41,12 @@ import { useEffect, useRef, useCallback } from "react";
  *   ttsRef.current.play(1)    // plays "Halo!" with id-ID voice
  *   ttsRef.current.stop()
  *   ttsRef.current.isReady(0) // true once decoded
+ *
+ * ── Loaded events ─────────────────────────────────────────────────────────
+ *   onLoaded      {func}     Reactive mode: called when the clip is decoded
+ *                            and ready, just before playback begins.
+ *   onAllLoaded   {func}     Preload mode: called once every entry in
+ *                            preloadTexts has been decoded successfully.
  */
 export default function GoogleTTS({
   speechUrl,
@@ -51,25 +57,27 @@ export default function GoogleTTS({
   preloadTexts,
   playSpeechRef,
   // component-level voice defaults
-  languageCode = "en-US",
-  voiceName = "Charon",
-  modelName = "gemini-2.5-flash-tts",
-  pitch = 0,
-  speakingRate = 1.0,
+  languageCode  = "en-US",
+  voiceName     = "Charon",
+  modelName     = "gemini-2.5-flash-tts",
+  pitch         = 0,
+  speakingRate  = 1.0,
   // callbacks
   onStart,
   onEnd,
   onError,
+  onLoaded,
+  onAllLoaded,
   onPreloadProgress,
 }) {
-  const audioCtxRef = useRef(null);
-  const sourceRef = useRef(null);
-  const debounceRef = useRef(null);
+  const audioCtxRef   = useRef(null);
+  const sourceRef     = useRef(null);
+  const debounceRef   = useRef(null);
   const naturalEndRef = useRef(false);
   // Map<index, AudioBuffer>
-  const preloadCache = useRef(new Map());
+  const preloadCache  = useRef(new Map());
   // Set<index> — tracks in-flight fetches to avoid duplicates
-  const inFlight = useRef(new Set());
+  const inFlight      = useRef(new Set());
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -84,7 +92,7 @@ export default function GoogleTTS({
   const stopCurrent = useCallback(() => {
     if (sourceRef.current) {
       naturalEndRef.current = false;
-      try { sourceRef.current.stop(); } catch (_) { }
+      try { sourceRef.current.stop(); } catch (_) {}
       sourceRef.current = null;
     }
   }, []);
@@ -104,9 +112,9 @@ export default function GoogleTTS({
 
   const fetchAndDecode = useCallback(async (params) => {
     const res = await fetch(speechUrl, {
-      method: "POST",
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+      body:    JSON.stringify(params),
     });
     if (!res.ok) throw new Error((await res.text()) || res.statusText);
     return getAudioCtx().decodeAudioData(await res.arrayBuffer());
@@ -142,11 +150,12 @@ export default function GoogleTTS({
       const buffer = await fetchAndDecode(
         resolveParams(inputText)
       );
+      onLoaded?.();
       await playBuffer(buffer);
     } catch (err) {
       onError?.(err);
     }
-  }, [fetchAndDecode, resolveParams, playBuffer, stopCurrent, onError]);
+  }, [fetchAndDecode, resolveParams, playBuffer, stopCurrent, onLoaded, onError]);
 
   useEffect(() => {
     if (!text?.trim()) { stopCurrent(); return; }
@@ -180,6 +189,7 @@ export default function GoogleTTS({
         preloadCache.current.set(i, buffer);
         loaded++;
         onPreloadProgress?.(loaded, total);
+        if (loaded === total) onAllLoaded?.();
       } catch (err) {
         if (!cancelled) onError?.(err);
       } finally {
