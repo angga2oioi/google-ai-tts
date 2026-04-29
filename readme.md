@@ -7,6 +7,7 @@ A headless React component for Google Cloud Text-to-Speech. Drop it anywhere in 
 - 🔇 **Headless** — zero UI, pure audio behaviour
 - ⚡ **Debounced** — avoids redundant API calls while text is still changing
 - 🔄 **Auto-cancels** — stops previous audio before starting new synthesis
+- 📦 **Preload** — fetch and decode multiple clips upfront, play them instantly on demand
 - 🎛️ **Fully controllable** — pitch, speed, voice, language, style prompt
 - 🧹 **Cleans up** — stops audio and closes AudioContext on unmount
 
@@ -57,8 +58,10 @@ function App() {
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `speechUrl` | `string` | **required** | Backend URL |
-| `text` | `string` | **required** | Text to synthesize. Supports inline audio tags e.g. `[whispers]`, `[laughs]`. A new value triggers synthesis. |
+| `text` | `string` | — | Text to synthesize. A new value triggers synthesis after an 800 ms debounce. Supports inline audio tags e.g. `[whispers]`, `[laughs]`. |
 | `prompt` | `string` | — | Natural language style prompt e.g. `"Speak in a calm, professional tone"` |
+| `preloadTexts` | `string[]` | — | Array of strings to fetch and decode in the background on mount. Play any entry instantly via `playSpeechRef`. |
+| `playSpeechRef` | `React.MutableRefObject` | — | Attach a ref to receive the imperative playback API. See [Imperative API](#imperative-api) below. |
 | `languageCode` | `string` | `"en-US"` | BCP-47 language tag, e.g. `"id-ID"`, `"ja-JP"` |
 | `voiceName` | `string` | `"Charon"` | Speaker ID from the 30 prebuilt voices e.g. `"Puck"`, `"Kore"`, `"Charon"`. Check it [here](https://ai.google.dev/gemini-api/docs/speech-generation#voices)|
 | `modelName` | `string` | `"gemini-2.5-flash-tts"` | Gemini TTS model. See supported models below. |
@@ -67,6 +70,7 @@ function App() {
 | `onStart` | `() => void` | — | Called when audio begins playing |
 | `onEnd` | `() => void` | — | Called when audio finishes naturally (not on manual stop) |
 | `onError` | `(err: Error) => void` | — | Called if the API request or audio decoding fails |
+| `onPreloadProgress` | `(loaded: number, total: number) => void` | — | Called after each `preloadTexts` entry finishes decoding |
 
 ### Supported models
 
@@ -77,7 +81,71 @@ function App() {
 | `gemini-2.5-flash-tts` | Low latency (default) |
 | `gemini-2.5-flash-lite-preview-tts` | Fastest / lowest cost |
 
+## Imperative API
+
+When you pass a `playSpeechRef`, the component populates it with a control object after mount:
+
+| Method | Signature | Description |
+|---|---|---|
+| `play` | `(index: number) => Promise<void>` | Plays the preloaded buffer at `index`. Falls back to an on-demand fetch if not yet cached. |
+| `stop` | `() => void` | Stops any currently playing audio immediately. |
+| `isReady` | `(index: number) => boolean` | Returns `true` if the buffer at `index` is decoded and ready to play. |
+| `readyCount` | `() => number` | Returns the total number of fully loaded buffers. |
+
 ## Examples
+
+### Preload a set of clips and play on demand
+
+```jsx
+const ttsRef = React.useRef()
+
+const lines = [
+  "Welcome to the tour.",
+  "On your left you'll see the main hall.",
+  "Thank you for visiting.",
+]
+
+<GoogleTTS
+  speechUrl={YOUR_SPEECH_URL}
+  preloadTexts={lines}
+  playSpeechRef={ttsRef}
+  onPreloadProgress={(loaded, total) =>
+    console.log(`${loaded} / ${total} clips ready`)
+  }
+  onStart={() => setPlaying(true)}
+  onEnd={() => setPlaying(false)}
+  onError={console.error}
+/>
+
+// Later — plays instantly from cache:
+<button onClick={() => ttsRef.current.play(1)}>
+  Play line 2
+</button>
+```
+
+### Reactive mode (text changes drive synthesis)
+
+```jsx
+<GoogleTTS
+  speechUrl={YOUR_SPEECH_URL}
+  text={transcript}
+  onStart={() => setPlaying(true)}
+  onEnd={() => setPlaying(false)}
+/>
+```
+
+### Both modes together
+
+The two modes are independent and can run simultaneously. `text` drives reactive synthesis while `preloadTexts` + `playSpeechRef` handle on-demand playback.
+
+```jsx
+<GoogleTTS
+  speechUrl={YOUR_SPEECH_URL}
+  text={liveCaption}
+  preloadTexts={uiSounds}
+  playSpeechRef={ttsRef}
+/>
+```
 
 ### Different language and voice
 
@@ -101,7 +169,7 @@ function App() {
 />
 ```
 
-### With a style prompt (v1beta1)
+### With a style prompt
 
 ```jsx
 <GoogleTTS
@@ -128,14 +196,17 @@ const [status, setStatus] = React.useState('idle') // 'idle' | 'loading' | 'play
 
 ## Behaviour Notes
 
-**Debouncing** — synthesis fires 800 ms after `text` stops changing. This prevents rapid API calls when `text` is bound to a live input or streaming source.
+**Debouncing** — reactive synthesis fires 800 ms after `text` stops changing. This prevents rapid API calls when `text` is bound to a live input or streaming source.
 
 **Auto-cancel** — if `text` changes while audio is playing, the current audio stops immediately and new synthesis begins after the debounce delay.
 
-**Natural end detection** — `onEnd` only fires when audio completes on its own. It does not fire when synthesis is interrupted by a new `text` value or component unmount.
+**Preload deduplication** — each index is fetched at most once. If `preloadTexts` changes reference but contains the same indices, already-cached or in-flight entries are skipped.
+
+**On-demand fallback** — calling `play(index)` before that entry has finished preloading triggers an immediate on-demand fetch for that index only; the result is then cached for future calls.
+
+**Natural end detection** — `onEnd` only fires when audio completes on its own. It does not fire when synthesis is interrupted by a new `text` value, a `stop()` call, or component unmount.
 
 **AudioContext lifecycle** — a single `AudioContext` is created on first synthesis and reused for the lifetime of the component. It is closed when the component unmounts.
-
 
 ## Browser Support
 

@@ -3,142 +3,236 @@ import { useEffect, useRef, useCallback, useState } from "react";
 /**
  * GoogleTTS
  *
- * Props:
- *   apiKey        {string}  - Google Cloud API key
- *   text          {string}  - Text to synthesize — triggers on change
- *   prompt        {string}  - Optional style prompt (v1beta1 input.prompt)
- *   languageCode  {string}  - e.g. "en-US"          default: "en-US"
- *   voiceName     {string}  - e.g. "en-US-Neural2-F" default: "en-US-Neural2-F"
- *   modelName     {string}  - e.g. "en-US-Neural2-F" default: "en-US-Neural2-F"
- *   pitch         {number}  - -20 to 20              default: 0
- *   speakingRate  {number}  - 0.25 to 4.0            default: 1.0
- *   onStart       {func}    - called when audio starts playing
- *   onEnd         {func}    - called when audio finishes naturally
- *   onError       {func}    - called with Error on failure
+ * Two modes that can be used together:
  *
- * Renders nothing. Pure behaviour component.
+ * ── Reactive mode (original) ──────────────────────────────────────────────
+ *   text          {string}   Text to synthesize on change (debounced 800ms)
+ *   prompt        {string}   Optional style prompt
+ *
+ * ── Preload mode (new) ────────────────────────────────────────────────────
+ *   preloadTexts  {string[]} Array of strings to fetch & decode on mount
+ *                            (or whenever the array reference changes)
+ *
+ * ── Imperative playback (new) ─────────────────────────────────────────────
+ *   playSpeechRef {React.MutableRefObject}
+ *                            Attach a ref here; after mount it will hold:
+ *                            { play(index), stop(), isReady(index) }
+ *
+ * All other props (speechUrl, languageCode, voiceName, …) are shared.
  *
  * Usage:
+ *   const ttsRef = useRef();
+ *
  *   <GoogleTTS
- *     apiKey="YOUR_KEY"
- *     text={transcript}
- *     languageCode="en-US"
- *     voiceName="en-US-Neural2-F"
- *     pitch={0}
- *     speakingRate={1.0}
+ *     speechUrl="/api/tts"
+ *     preloadTexts={["Hello!", "How are you?", "Goodbye!"]}
+ *     playSpeechRef={ttsRef}
  *     onStart={() => setPlaying(true)}
- *     onEnd={() => setPlaying(false)}
- *     onError={err => console.error(err)}
+ *     onEnd={()   => setPlaying(false)}
+ *     onError={console.error}
  *   />
+ *
+ *   // later:
+ *   ttsRef.current.play(1);   // plays "How are you?"
+ *   ttsRef.current.stop();
+ *   ttsRef.current.isReady(0); // true once decoded
  */
 export default function GoogleTTS({
-    speechUrl,
-    apiKey,
-    text,
-    prompt,
-    languageCode = "en-US",
-    voiceName = "Achernar",
-    modelName = "gemini-3.1-flash-tts-preview",
-    pitch = 0,
-    speakingRate = 1.0,
-    onStart,
-    onEnd,
-    onError,
+  speechUrl,
+  apiKey,
+  // reactive mode
+  text,
+  prompt,
+  // preload mode
+  preloadTexts,
+  playSpeechRef,
+  // voice config
+  languageCode  = "en-US",
+  voiceName     = "Achernar",
+  modelName     = "gemini-3.1-flash-tts-preview",
+  pitch         = 0,
+  speakingRate  = 1.0,
+  // callbacks
+  onStart,
+  onEnd,
+  onError,
+  onPreloadProgress, // (loadedCount, totalCount) => void
 }) {
-    const audioCtxRef = useRef(null);
-    const sourceRef = useRef(null);
-    const debounceRef = useRef(null);
-    const naturalEndRef = useRef(false);
+  const audioCtxRef    = useRef(null);
+  const sourceRef      = useRef(null);
+  const debounceRef    = useRef(null);
+  const naturalEndRef  = useRef(false);
+  // Map<index, AudioBuffer>
+  const preloadCache   = useRef(new Map());
+  // Track in-flight fetches so we don't double-fetch
+  const inFlight       = useRef(new Set());
 
-    const stopCurrent = useCallback(() => {
-        if (sourceRef.current) {
-            naturalEndRef.current = false;
-            try { sourceRef.current.stop(); } catch (_) { }
-            sourceRef.current = null;
-        }
-    }, []);
+  // ── Shared helpers ────────────────────────────────────────────────────────
 
-    const synthesize = useCallback(async (inputText) => {
-        stopCurrent();
+  const getAudioCtx = useCallback(() => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current =
+        new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtxRef.current;
+  }, []);
 
-        const payload = {
-            ...(prompt ? { prompt } : {}),
-            text: inputText,
-            languageCode,
-            modelName,
-            voiceName,
-            pitch,
-            speakingRate
-        };
+  const stopCurrent = useCallback(() => {
+    if (sourceRef.current) {
+      naturalEndRef.current = false;
+      try { sourceRef.current.stop(); } catch (_) {}
+      sourceRef.current = null;
+    }
+  }, []);
 
+  // ── Core fetch + decode ───────────────────────────────────────────────────
+
+  const fetchAndDecode = useCallback(async (inputText) => {
+    const payload = {
+      ...(prompt ? { prompt } : {}),
+      text: inputText,
+      languageCode,
+      modelName,
+      voiceName,
+      pitch,
+      speakingRate,
+    };
+
+    const res = await fetch(speechUrl, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(msg || res.statusText);
+    }
+
+    const arrayBuffer = await res.arrayBuffer();
+    const ctx = getAudioCtx();
+    return ctx.decodeAudioData(arrayBuffer);
+  }, [speechUrl, prompt, languageCode, modelName, voiceName, pitch, speakingRate, getAudioCtx]);
+
+  // ── Play an AudioBuffer ───────────────────────────────────────────────────
+
+  const playBuffer = useCallback(async (buffer) => {
+    stopCurrent();
+
+    const ctx = getAudioCtx();
+    if (ctx.state === "suspended") await ctx.resume();
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    sourceRef.current = source;
+
+    naturalEndRef.current = true;
+    source.onended = () => {
+      sourceRef.current = null;
+      if (naturalEndRef.current) onEnd?.();
+    };
+
+    source.start(0);
+    onStart?.();
+  }, [stopCurrent, getAudioCtx, onStart, onEnd]);
+
+  // ── Reactive mode (original behaviour) ───────────────────────────────────
+
+  const synthesize = useCallback(async (inputText) => {
+    stopCurrent();
+    try {
+      const buffer = await fetchAndDecode(inputText);
+      await playBuffer(buffer);
+    } catch (err) {
+      onError?.(err);
+    }
+  }, [fetchAndDecode, playBuffer, stopCurrent, onError]);
+
+  useEffect(() => {
+    if (!text?.trim()) { stopCurrent(); return; }
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => synthesize(text), 800);
+    return () => clearTimeout(debounceRef.current);
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Preload mode ──────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!preloadTexts?.length) return;
+
+    let cancelled = false;
+    let loaded = 0;
+    const total = preloadTexts.length;
+
+    preloadTexts.forEach(async (t, i) => {
+      // Skip if already cached or in-flight
+      if (preloadCache.current.has(i) || inFlight.current.has(i)) return;
+
+      inFlight.current.add(i);
+      try {
+        const buffer = await fetchAndDecode(t);
+        if (cancelled) return;
+        preloadCache.current.set(i, buffer);
+        loaded++;
+        onPreloadProgress?.(loaded, total);
+      } catch (err) {
+        if (!cancelled) onError?.(err);
+      } finally {
+        inFlight.current.delete(i);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [preloadTexts]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Imperative API via ref ────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!playSpeechRef) return;
+
+    playSpeechRef.current = {
+      /**
+       * play(index)
+       * Plays the preloaded buffer at `index`.
+       * Falls back to fetching on-demand if not yet cached.
+       */
+      play: async (index) => {
         try {
-            const res = await fetch(
-                speechUrl,
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
-                }
-            );
+          let buffer = preloadCache.current.get(index);
 
-            if (!res.ok) {
-                const errorText = await res.text();
-                throw new Error(errorText || res.statusText);
-            }
+          if (!buffer) {
+            const t = preloadTexts?.[index];
+            if (!t) throw new Error(`No text at index ${index}`);
+            buffer = await fetchAndDecode(t);
+            preloadCache.current.set(index, buffer);
+          }
 
-            // 1. Get the response as an ArrayBuffer directly
-            const arrayBuffer = await res.arrayBuffer();
-
-            if (!audioCtxRef.current) {
-                audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            const ctx = audioCtxRef.current;
-            if (ctx.state === "suspended") await ctx.resume();
-
-            // 2. Decode the binary directly (no more atob or base64 loops!)
-            const buffer = await ctx.decodeAudioData(arrayBuffer);
-
-            const source = ctx.createBufferSource();
-            source.buffer = buffer;
-
-            source.connect(ctx.destination);
-            sourceRef.current = source;
-
-            // onended fires for both natural end AND manual stop().
-            // naturalEndRef distinguishes the two.
-            naturalEndRef.current = true;
-            source.onended = () => {
-                sourceRef.current = null;
-                if (naturalEndRef.current) {
-                    onEnd?.();
-                }
-            };
-
-            source.start(0);
-            onStart?.();
+          await playBuffer(buffer);
         } catch (err) {
-            onError?.(err);
+          onError?.(err);
         }
-    }, [apiKey, languageCode, voiceName, modelName, pitch, speakingRate, prompt, stopCurrent, onStart, onEnd, onError]);
+      },
 
-    useEffect(() => {
-        if (!text?.trim()) {
-            stopCurrent();
-            return;
-        }
+      /** stop() — stops any currently playing audio */
+      stop: stopCurrent,
 
-        clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(() => synthesize(text), 800);
+      /** isReady(index) — true if the buffer is cached and ready */
+      isReady: (index) => preloadCache.current.has(index),
 
-        return () => clearTimeout(debounceRef.current);
-    }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+      /** readyCount() — number of buffers fully loaded */
+      readyCount: () => preloadCache.current.size,
+    };
+  }); // runs every render so callbacks stay fresh
 
-    useEffect(() => {
-        return () => {
-            stopCurrent();
-            audioCtxRef.current?.close();
-        };
-    }, [stopCurrent]);
+  // ── Cleanup ───────────────────────────────────────────────────────────────
 
-    return null;
+  useEffect(() => {
+    return () => {
+      stopCurrent();
+      audioCtxRef.current?.close();
+    };
+  }, [stopCurrent]);
+
+  return null;
 }
