@@ -57,9 +57,9 @@ export default function GoogleTTS({
   preloadTexts,
   playSpeechRef,
   // component-level voice defaults
-  languageCode  = "en-US",
-  voiceName     = "Charon",
-  modelName     = "gemini-2.5-flash-tts",
+  languageCode,
+  voiceName,
+  modelName,
   pitch         = 0,
   speakingRate  = 1.0,
   // callbacks
